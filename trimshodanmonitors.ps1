@@ -43,6 +43,7 @@
         
     }
 }
+#Borrowed from Datto RMM module https://github.com/aaronengels/DattoRMM
 function New-ApiAccessToken {
 
     <#
@@ -82,11 +83,18 @@ function New-ApiAccessToken {
         Method      = 'POST'
         ContentType = 'application/x-www-form-urlencoded'
         Body        = 'grant_type=password&username={0}&password={1}' -f $apiKey, $apiSecretKey
-        UseBasicParsing = $True
     }
     
     # Request access token
-    (Invoke-WebRequest @params | ConvertFrom-Json).access_token
+    try 
+    {
+        (Invoke-WebRequest -UseBasicParsing @params | ConvertFrom-Json).access_token
+
+    }
+    catch 
+    {
+        Write-Host $_.Exception.Message
+    }
 
 }
 function Set-DrmmApiParameters {
@@ -126,148 +134,142 @@ function Set-DrmmApiParameters {
 }
 function Get-DrmmAccountDevices {
 
-	<#
-	.SYNOPSIS
-	Fetches the devices of the authenticated user's account.
+    <#
+    .SYNOPSIS
+    Fetches the devices of the authenticated user's account.
+ 
+    .DESCRIPTION
+    Returns device data, including patch status, anti-virus status and user defined fields.
+     
+    .PARAMETER FilterId
+    Optional parameter specifying a filter to return only some devices
+    #>
 
-	.DESCRIPTION
-	Returns device data, including patch status, anti-virus status and user defined fields.
-
-	#>
+    # Function Parameters
+    Param (
+        [Parameter(Mandatory=$False)]
+        [String]$FilterId
+    )
 
     # Declare Variables
     $apiMethod = 'GET'
     $maxPage = 250
     $nextPageUrl = $null
     $page = 0
+    if ( $PSBoundParameters.ContainsKey("FilterId") ) {
+        $filterQuery = "&filterId=$FilterId"
+    }
     $Results = @()
 
-    do {
-	    $Response = New-ApiRequest -apiMethod $apiMethod -apiRequest "/v2/account/devices?max=$maxPage&page=$page" | ConvertFrom-Json
-	    if ($Response) {
-		    $nextPageUrl = $Response.pageDetails.nextPageUrl
-		    $Results += $Response.devices
-		    $page++
-	    }
+    $Results = do {
+        $Response = New-ApiRequest -apiMethod $apiMethod -apiRequest "/v2/account/devices?max=$maxPage&page=$page$filterQuery" | ConvertFrom-Json
+        if ($Response) {
+            $nextPageUrl = $Response.pageDetails.nextPageUrl
+            $Response.devices
+            $page++
+        }
     }
-    until ($nextPageUrl -eq $null)
+    until ($null -eq $nextPageUrl)
 
     # Return all account devices
     return $Results
 }
 function New-ApiRequest {
 
-	<#
-	.SYNOPSIS
-	Makes a API request.
-
-	.DESCRIPTION
-	Returns the API response.
-
-	.PARAMETER ApiMethod
-	Provide API Method GET, PUT or POST
-
-	.PARAMETER ApiRequest 
-	See Datto RMM API swagger UI
-
-	.PARAMETER ApiRequestBody 
-	Only used with PUT and POST request
-
+    <#
+    .SYNOPSIS
+    Makes a API request.
+ 
+    .DESCRIPTION
+    Returns the API response.
+ 
+    .PARAMETER ApiMethod
+    Provide API Method GET, PUT or POST
+ 
+    .PARAMETER ApiRequest
+    See Datto RMM API swagger UI
+ 
+    .PARAMETER ApiRequestBody
+    Only used with PUT and POST request
+ 
     .INPUTS
-	$apiUrl = The API URL
-	$apiKey = The API Key
-	$apiKeySecret = The API Secret Key
-
-	.OUTPUTS
-	API response
-
-	#>
+    $apiUrl = The API URL
+    $apiKey = The API Key
+    $apiKeySecret = The API Secret Key
+ 
+    .OUTPUTS
+    API response
+ 
+    #>
     
-	Param(
-        [Parameter(Mandatory=$True)]
-        [ValidateSet('GET','PUT','POST')]
-		[string]$apiMethod,
+    Param(
+        [Parameter(Mandatory = $True)]
+        [ValidateSet('GET', 'PUT', 'POST', 'DELETE')]
+        [string]$apiMethod,
 
-        [Parameter(Mandatory=$True)]
-		[string]$apiRequest,
+        [Parameter(Mandatory = $True)]
+        [string]$apiRequest,
     
-        [Parameter(Mandatory=$False)]
-		[string]$apiRequestBody
-	)
-
-	# Check API Parameters
-	if (!$apiUrl -or !$apiKey -or !$apiSecretKey) {
-		Write-Host "API Parameters missing, please run Set-DrmmApiParameters first!"
-		return
-	}
-
-	# Define parameters for Invoke-WebRequest cmdlet
-	$params = [ordered] @{
-		Uri         = '{0}/api{1}' -f $apiUrl, $apiRequest
-		Method      = $apiMethod
-		ContentType = 'application/json'
-		Headers     = @{'Authorization' = 'Bearer {0}' -f $apiAccessToken}
-		UseBasicParsing = $True
-	}
-
-	# Add body to parameters if present
-	If ($apiRequestBody) {$params.Add('Body',$apiRequestBody)}
-
-	# Make request
-	try 
-	{
-		(Invoke-WebRequest @params).Content
-	}
-	catch
-	{
-		
-		$exceptionError = $_.Exception.Message
-		
-		switch ($exceptionError)
-		{
-	
-			'The remote server returned an error: (429).' 
-			{
-				Start-Sleep -Seconds 60
-			}
-
-			'The remote server returned an error: (403) Forbidden.'
-			{
-				Start-Sleep -Seconds 300
-			}
-
-		}
-
-		throw
-	}
-}
-function Get-DrmmDevice {
-
-	<#
-	.SYNOPSIS
-	Fetches data of the device identified by the given device Uid
-
-	.DESCRIPTION
-	Returns device settings, device type, device anti-virus status, device patch Status and UDF's.
-
-	.PARAMETER DeviceUid
-	Provide device uid which will be used to return device data.
-	
-	#>
-    
-	# Function Parameters
-    Param (
-        [Parameter(Mandatory=$True)] 
-        $deviceUid
+        [Parameter(Mandatory = $False)]
+        [string]$apiRequestBody
     )
-	
-    # Declare Variables
-    $apiMethod = 'GET'
-    
-	# Return device data
-    return New-ApiRequest -apiMethod $apiMethod -apiRequest "/v2/device/$deviceUid" | ConvertFrom-Json
 
+    # Check API Parameters
+    if (!$apiUrl -or !$apiKey -or !$apiSecretKey) {
+        Write-Host "API Parameters missing, please run Set-DrmmApiParameters first!"
+        return
+    }
+
+    # Define parameters for Invoke-WebRequest cmdlet
+    $params = [ordered] @{
+        Uri         = '{0}/api{1}' -f $apiUrl, $apiRequest
+        Method      = $apiMethod
+        ContentType = 'application/json'
+        Headers     = @{
+            'Authorization' = 'Bearer {0}' -f $apiAccessToken
+        }
+    }
+
+    # Add body to parameters if present
+    If ($apiRequestBody) { $params.Add('Body', $apiRequestBody) }
+
+    # Make request
+    try {
+        (Invoke-WebRequest -UseBasicParsing @params).Content
+    }
+    catch {
+        
+        $exceptionError = $_.Exception.Message
+        
+        switch ($exceptionError) {
+    
+            'The remote server returned an error: (429).' {
+                Write-Host 'New-ApiRequest : API rate limit breached, sleeping for 60 seconds'
+                Start-Sleep -Seconds 60
+            }
+
+            'The remote server returned an error: (403) Forbidden.' {
+                Write-Host 'New-ApiRequest : AWS DDOS protection breached, sleeping for 5 minutes'
+                Start-Sleep -Seconds 300
+            }
+
+            'The remote server returned an error: (404) Not Found.' {
+                Write-Host "New-ApiRequest : $apiRequest not found!"
+            }
+
+            'The remote server returned an error: (504) Gateway Timeout.' {
+                Write-Host "New-ApiRequest : Gateway Timeout, sleeping for 60 seconds"
+                Start-Sleep -Seconds 60
+            }
+
+            default {
+                Write-Host "$exceptionError"
+            }
+
+        }
+    }
 }
+
 #This is the api server that Datto RMM uses for your datto tenant, you'll need to update it to fit your tenant. 
 #Refer to this document to pull the Datto API server https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm
 $apiUrl = "https://api.centrastage.net"
